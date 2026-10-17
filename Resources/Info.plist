@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+    <key>CFBundleName</key><string>Tilda</string>
+    <key>CFBundleDisplayName</key><string>Tilda</string>
+    <key>CFBundleIdentifier</key><string>com.tildamac.Tilda</string>
+    <key>CFBundleVersion</key><string>3</string>
+    <key>CFBundleShortVersionString</key><string>1.0.2</string>
+    <key>CFBundleExecutable</key><string>Tilda</string>
+    <key>CFBundleIconFile</key><string>Tilda</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>LSMinimumSystemVersion</key><string>13.0</string>
+    <key>LSUIElement</key><false/>
+    <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
+    <key>CFBundleSupportedPlatforms</key><array><string>MacOSX</string></array>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSPrincipalClass</key><string>NSApplication</string>
+    <key>NSHumanReadableCopyright</key><string>Copyright © 2026. Built with SwiftTerm (MIT).</string>
+</dict></plist>
