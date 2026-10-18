@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 import ServiceManagement
@@ -11,8 +12,7 @@ final class Preferences: ObservableObject {
     private static let loginPermissionKey = "loginPermissionAsked.v1"
     @Published var value: Configuration {
         didSet {
-            var validated = value
-            validated.sanitize()
+            let validated = Self.validated(value)
             if validated != value { value = validated }
             if !transient, let data = try? JSONEncoder().encode(validated) { defaults.set(data, forKey: "configuration.v1") }
         }
@@ -25,15 +25,36 @@ final class Preferences: ObservableObject {
         !transient && !defaults.bool(forKey: Self.loginPermissionKey) && loginStatus != .enabled
     }
     var changeShortcut: ((Shortcut) -> Bool)?
+    var shellError: String? {
+        guard !value.shell.isEmpty else { return nil }
+        let path = (value.shell as NSString).expandingTildeInPath
+        var directory: ObjCBool = false
+        return path.hasPrefix("/") && FileManager.default.fileExists(atPath: path, isDirectory: &directory)
+            && !directory.boolValue && FileManager.default.isExecutableFile(atPath: path)
+            ? nil : "Shell must be an executable file at an absolute path."
+    }
+    var directoryError: String? {
+        guard !value.directory.isEmpty else { return nil }
+        let path = (value.directory as NSString).expandingTildeInPath
+        var directory: ObjCBool = false
+        return path.hasPrefix("/") && FileManager.default.fileExists(atPath: path, isDirectory: &directory) && directory.boolValue
+            ? nil : "Directory not found. New panes will open in your home directory."
+    }
+
+    private static func validated(_ value: Configuration) -> Configuration {
+        var config = value
+        config.sanitize()
+        if NSFont(name: config.fontName, size: config.fontSize) == nil { config.fontName = "Menlo-Regular" }
+        return config
+    }
 
     init(transient: Bool = false, defaults: UserDefaults = .standard, loginItems: LoginItemControlling = SystemLoginItemController()) {
         self.transient = transient
         self.defaults = defaults
         self.loginItems = loginItems
-        var config = (transient ? nil : defaults.data(forKey: "configuration.v1"))
+        let config = (transient ? nil : defaults.data(forKey: "configuration.v1"))
             .flatMap { try? JSONDecoder().decode(Configuration.self, from: $0) } ?? Configuration()
-        config.sanitize()
-        value = config
+        value = Self.validated(config)
         if !transient { refreshLoginStatus() }
     }
 

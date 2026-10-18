@@ -63,7 +63,7 @@ final class Workspace: ObservableObject {
     func newTab() {
         guard tabs.count < 12 else { NSSound.beep(); return }
         activeSession?.refreshDirectory()
-        let pane = session(directory: activeSession?.directory)
+        let pane = session(directory: preferences.value.directory.isEmpty ? activeSession?.directory : nil)
         let tab = TerminalTab(sessions: [pane], selected: pane.id)
         tabs.append(tab); selectedTab = tab.id
         focus(); persist()
@@ -71,7 +71,7 @@ final class Workspace: ObservableObject {
     func split(vertical: Bool) {
         guard let index = tabs.firstIndex(where: { $0.id == selectedTab }), tabs[index].sessions.count < 4 else { NSSound.beep(); return }
         activeSession?.refreshDirectory()
-        let pane = session(directory: activeSession?.directory)
+        let pane = session(directory: preferences.value.directory.isEmpty ? activeSession?.directory : nil)
         tabs[index].vertical = vertical
         tabs[index].sessions.append(pane)
         tabs[index].selected = pane.id

@@ -5,6 +5,15 @@ import SwiftUI
 struct PreferencesView: View {
     @ObservedObject var preferences: Preferences
     @State private var selectedPane = "General"
+    @State private var reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    private var fonts: [(String, String)] {
+        var fonts = [("Menlo", "Menlo-Regular"), ("SF Mono", "SFMono-Regular"), ("Monaco", "Monaco"), ("Courier", "Courier")]
+            .filter { NSFont(name: $0.1, size: 13) != nil }
+        if !fonts.contains(where: { $0.1 == preferences.value.fontName }) {
+            fonts.append((preferences.value.fontName, preferences.value.fontName))
+        }
+        return fonts
+    }
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 4) {
@@ -25,7 +34,10 @@ struct PreferencesView: View {
                 default: general
                 }
             }.padding(.horizontal, 20).padding(.bottom, 16)
-        }.frame(width: 590, height: 540).background(Color(nsColor: .windowBackgroundColor))
+        }.frame(width: 590, height: 620).background(Color(nsColor: .windowBackgroundColor))
+            .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification)) { _ in
+                reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            }
     }
     private var general: some View {
         Form {
@@ -40,6 +52,9 @@ struct PreferencesView: View {
                 Toggle("Hide when another app becomes active", isOn: $preferences.value.autoHide)
                 Toggle("Escape hides Tilda at an idle shell prompt", isOn: $preferences.value.escapeHides)
                 Toggle("Animate the dropdown", isOn: $preferences.value.animate)
+                if reduceMotion && preferences.value.animate {
+                    Text("Animation is disabled by macOS Reduce Motion.").font(.caption).foregroundStyle(.secondary)
+                }
                 Toggle("Start with the terminal hidden", isOn: $preferences.value.startHidden)
             }
             Section("Sessions") {
@@ -61,10 +76,7 @@ struct PreferencesView: View {
                     ForEach(["Midnight", "Nord", "Dracula", "Daylight"], id: \.self) { Text($0) }
                 }
                 Picker("Font", selection: $preferences.value.fontName) {
-                    Text("Menlo").tag("Menlo-Regular")
-                    Text("SF Mono").tag("SFMono-Regular")
-                    Text("Monaco").tag("Monaco")
-                    Text("Courier").tag("Courier")
+                    ForEach(fonts, id: \.1) { font in Text(font.0).tag(font.1) }
                 }
                 Stepper("Font size: \(Int(preferences.value.fontSize)) pt", value: $preferences.value.fontSize, in: 10...32)
                 Picker("Cursor", selection: $preferences.value.cursor) {
@@ -89,7 +101,9 @@ struct PreferencesView: View {
         Form {
             Section("New shells") {
                 TextField("Shell", text: $preferences.value.shell, prompt: Text("System login shell"))
+                if let error = preferences.shellError { Text(error).font(.caption).foregroundStyle(.red) }
                 TextField("Start in", text: $preferences.value.directory, prompt: Text("Home directory"))
+                if let error = preferences.directoryError { Text(error).font(.caption).foregroundStyle(.red) }
                 Text("Use an absolute shell path, e.g. /bin/zsh. Changes apply to new panes.").font(.caption).foregroundStyle(.secondary)
             }
             Section("Interaction") {

@@ -1,0 +1,17 @@
+.build/
+.swiftpm/
+dist/*
+!dist/Tilda-*.dmg
+.DS_Store
+.artifacts/
+*.xcuserstate
+xcuserdata/
+*.dSYM/
+*.log
+.env
+.env.*
+!.env.example
+*.p12
+*.p8
+*.mobileprovision
+*.provisionprofile

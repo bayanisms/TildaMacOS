@@ -35,7 +35,7 @@ final class TerminalSession: NSObject, Identifiable, LocalProcessTerminalViewDel
         let requested = (directory ?? configuration.directory) as NSString?
         let expanded = requested?.expandingTildeInPath ?? ""
         var isDirectory: ObjCBool = false
-        self.directory = FileManager.default.fileExists(atPath: expanded, isDirectory: &isDirectory) && isDirectory.boolValue
+        self.directory = expanded.hasPrefix("/") && FileManager.default.fileExists(atPath: expanded, isDirectory: &isDirectory) && isDirectory.boolValue
             ? expanded : FileManager.default.homeDirectoryForCurrentUser.path
         view = ShellTerminalView(frame: NSRect(x: 0, y: 0, width: 900, height: 400), options: TerminalOptions(scrollback: configuration.scrollback, kittyImageCacheLimitBytes: 16 * 1024 * 1024))
         super.init()
@@ -50,14 +50,16 @@ final class TerminalSession: NSObject, Identifiable, LocalProcessTerminalViewDel
         guard !stopped else { return }
         let accountShell = getpwuid(getuid()).flatMap { $0.pointee.pw_shell }.map { String(cString: $0) } ?? "/bin/zsh"
         let shell = configuration.shell.isEmpty ? accountShell : (configuration.shell as NSString).expandingTildeInPath
-        guard shell.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: shell) else {
+        var isDirectory: ObjCBool = false
+        guard shell.hasPrefix("/"), FileManager.default.fileExists(atPath: shell, isDirectory: &isDirectory),
+              !isDirectory.boolValue, FileManager.default.isExecutableFile(atPath: shell) else {
             exited = true
             view.feed(text: "\r\n  Cannot launch shell: \(shell)\r\n  Choose an executable in Preferences → Terminal, then open a new pane.\r\n")
             onChange?(); return
         }
         title = URL(fileURLWithPath: shell).lastPathComponent
         var environment = Terminal.getEnvironmentVariables(termName: "xterm-256color")
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.2"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.3"
         environment += ["TERM_PROGRAM=Tilda", "TERM_PROGRAM_VERSION=\(version)", "SHELL=\(shell)", "PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"]
         environment.append("TERM_SESSION_ID=\(id.uuidString)")
         for key in ["SSH_AUTH_SOCK", "TMPDIR"] {

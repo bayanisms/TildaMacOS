@@ -68,7 +68,7 @@ final class RecorderButton: NSButton {
         guard recording, let preferences else { return super.keyDown(with: event) }
         if event.keyCode == 53 { _ = resignFirstResponder(); return }
         let flags = event.modifierFlags.intersection([.command, .control, .option, .shift])
-        let functionKey = (122...126).contains(event.keyCode) || [120,99,118,96,97,98,100,101,109,103,111,105,107,113,106,64,79,80,90].contains(event.keyCode)
+        let functionKey = [122,120,99,118,96,97,98,100,101,109,103,111,105,107,113,106,64,79,80,90].contains(event.keyCode)
         guard !flags.intersection([.command, .control, .option]).isEmpty || functionKey else {
             preferences.shortcutError = "Include Control, Option, or Command, or use a function key."
             return

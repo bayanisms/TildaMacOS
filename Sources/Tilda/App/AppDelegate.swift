@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     lazy var workspace = Workspace(preferences: preferences)
     let hotKey = GlobalHotKey()
     var panel: DropdownPanel!
+    var dropdown: DropdownContentView!
     var settings: NSWindow?
     var statusItem: NSStatusItem!
     var subscription: AnyCancellable?
@@ -22,7 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var previousApp: NSRunningApplication?
     var observers: [NSObjectProtocol] = []
     var visible = false
-    var animationGeneration = 0
+    private var pendingHide: (() -> Void)?
     var loginPermissionAlert: NSAlert?
     private var didShutDown = false
     private var animationsEnabled: Bool { preferences.value.animate && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
@@ -42,8 +43,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
+        panel.animationBehavior = .none
         panel.delegate = self; panel.acceptsMouseMovedEvents = true
-        panel.contentView = NSHostingView(rootView: TerminalWindowView(workspace: workspace, preferences: preferences))
+        dropdown = DropdownContentView(content: NSHostingView(rootView: TerminalWindowView(workspace: workspace, preferences: preferences)))
+        panel.contentView = dropdown
         workspace.hide = { [weak self] in self?.hide() }
         workspace.showPreferences = { [weak self] in self?.openPreferences() }
         hotKey.action = { [weak self] in self?.toggle() }
@@ -54,7 +57,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard let self else { return }
             self.workspace.applyPreferences()
             self.panel.alphaValue = self.preferences.value.opacity
-            if self.visible { self.panel.setFrame(self.targetFrame(), display: true) }
+            if self.visible { self.updatePanelFrame() }
+            else if !self.animationsEnabled && self.dropdown.isAnimating { self.finishTransition() }
         }
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
@@ -62,14 +66,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] notification in
             guard let self, self.visible, self.preferences.value.autoHide, !self.workspace.pinned,
-                  self.settings?.isVisible != true, NSApp.modalWindow == nil,
+                  self.settings?.isVisible != true, self.panel.attachedSheet == nil, NSApp.modalWindow == nil,
                   let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
                   app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
             self.hide(restoreFocus: false)
         })
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             guard let self, self.visible else { return }
-            self.panel.setFrame(self.targetFrame(), display: true)
+            self.updatePanelFrame()
+        })
+        observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self, !self.animationsEnabled else { return }
+            self.finishTransition()
         })
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             self?.preferences.refreshLoginStatus()
@@ -119,21 +127,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return TerminalUtilities.panelFrame(visibleFrame: (screen ?? NSScreen.main)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900), width: preferences.value.width, height: preferences.value.height)
     }
     @objc func toggle() { visible && panel.isKeyWindow ? hide() : show() }
+    private func updatePanelFrame() {
+        let frame = targetFrame()
+        if panel.frame != frame {
+            finishTransition()
+            panel.setFrame(frame, display: true)
+        } else if !animationsEnabled && dropdown.isAnimating { finishTransition() }
+    }
+    private func finishTransition() {
+        dropdown.setRevealed(visible, animated: false)
+        panel.hasShadow = visible
+        if !visible {
+            let finish = pendingHide
+            pendingHide = nil
+            if let finish { finish() } else { panel.orderOut(nil) }
+        }
+    }
     func show() {
         if NSApp.isHidden { NSApp.unhideWithoutActivation() }
-        if !visible { previousApp = NSWorkspace.shared.frontmostApplication }
-        animationGeneration += 1
-        panel.contentView?.layer?.removeAllAnimations()
+        if !panel.isVisible, let frontmost = NSWorkspace.shared.frontmostApplication,
+           frontmost.processIdentifier != ProcessInfo.processInfo.processIdentifier { previousApp = frontmost }
         let frame = targetFrame()
         let wasVisible = visible
+        let wasOrdered = panel.isVisible
         visible = true
+        pendingHide = nil
         panel.alphaValue = preferences.value.opacity
-        panel.setFrame(wasVisible ? frame : frame.offsetBy(dx: 0, dy: animationsEnabled ? 28 : 0), display: true)
+        panel.ignoresMouseEvents = false
+        panel.setFrame(frame, display: true)
+        panel.contentView?.layoutSubtreeIfNeeded()
+        if !wasOrdered { dropdown.setRevealed(false, animated: false) }
         panel.makeKeyAndOrderFront(nil)
-        if animationsEnabled && !wasVisible {
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.18; context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                panel.animator().setFrame(frame, display: true)
+        if !wasVisible || !wasOrdered {
+            panel.hasShadow = false
+            dropdown.setRevealed(true, animated: animationsEnabled) { [weak self] in
+                guard let self, self.visible else { return }
+                self.panel.hasShadow = true
             }
         }
         workspace.focus()
@@ -141,26 +170,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func hide(restoreFocus: Bool = true) {
         guard visible else { return }
         visible = false
+        panel.ignoresMouseEvents = true
+        panel.hasShadow = false
         workspace.persist()
-        animationGeneration += 1
-        let generation = animationGeneration
         let finish = { [weak self] in
-            guard let self, generation == self.animationGeneration else { return }
+            guard let self, !self.visible else { return }
             self.panel.orderOut(nil)
             if restoreFocus, self.previousApp?.isTerminated == false { self.previousApp?.activate(options: []) }
         }
-        if animationsEnabled {
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.12
-                panel.animator().alphaValue = 0
-            } completionHandler: { finish() }
-        } else { finish() }
+        pendingHide = finish
+        dropdown.setRevealed(false, animated: animationsEnabled) { [weak self] in
+            self?.pendingHide = nil
+            finish()
+        }
     }
 
     @objc func openPreferences() {
         preferences.refreshLoginStatus()
         if settings == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 590, height: 540), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 590, height: 620), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
             window.title = "Tilda Settings"; window.isReleasedWhenClosed = false
             window.contentView = NSHostingView(rootView: PreferencesView(preferences: preferences))
             window.center(); settings = window
@@ -173,7 +201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self, self.visible, !self.panel.isKeyWindow,
                   self.preferences.value.autoHide, !self.workspace.pinned,
-                  self.settings?.isVisible != true, NSApp.modalWindow == nil else { return }
+                  self.settings?.isVisible != true, self.panel.attachedSheet == nil, NSApp.modalWindow == nil else { return }
             self.hide(restoreFocus: false)
         }
     }
@@ -277,7 +305,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func quit() { NSApp.terminate(nil) }
     @objc func about() {
         NSApp.activate(ignoringOtherApps: true)
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.2"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.3"
         NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "Tilda", .applicationVersion: version])
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { show(); return true }
@@ -291,6 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func shutdown() {
         guard !didShutDown else { return }
         didShutDown = true
+        finishTransition()
         workspace.persist(); workspace.allSessions.forEach { $0.stop() }
         timer?.invalidate()
         subscription?.cancel()
