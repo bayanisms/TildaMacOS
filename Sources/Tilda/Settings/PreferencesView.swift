@@ -6,9 +6,12 @@ struct PreferencesView: View {
     @ObservedObject var preferences: Preferences
     @State private var selectedPane = "General"
     @State private var reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    @FocusState private var focusedField: PathField?
+    @State private var shellError: String?
+    @State private var directoryError: String?
+    private enum PathField { case shell, directory }
     private var fonts: [(String, String)] {
-        var fonts = [("Menlo", "Menlo-Regular"), ("SF Mono", "SFMono-Regular"), ("Monaco", "Monaco"), ("Courier", "Courier")]
-            .filter { NSFont(name: $0.1, size: 13) != nil }
+        var fonts = Preferences.fonts
         if !fonts.contains(where: { $0.1 == preferences.value.fontName }) {
             fonts.append((preferences.value.fontName, preferences.value.fontName))
         }
@@ -101,10 +104,15 @@ struct PreferencesView: View {
         Form {
             Section("New shells") {
                 TextField("Shell", text: $preferences.value.shell, prompt: Text("System login shell"))
-                if let error = preferences.shellError { Text(error).font(.caption).foregroundStyle(.red) }
+                    .focused($focusedField, equals: .shell)
+                    .onSubmit { shellError = preferences.shellError }
+                if let shellError { Text(shellError).font(.caption).foregroundStyle(.red) }
                 TextField("Start in", text: $preferences.value.directory, prompt: Text("Home directory"))
-                if let error = preferences.directoryError { Text(error).font(.caption).foregroundStyle(.red) }
-                Text("Use an absolute shell path, e.g. /bin/zsh. Changes apply to new panes.").font(.caption).foregroundStyle(.secondary)
+                    .focused($focusedField, equals: .directory)
+                    .onSubmit { directoryError = preferences.directoryError }
+                if let directoryError { Text(directoryError).font(.caption).foregroundStyle(.red) }
+                Text("Use an absolute shell path, e.g. /bin/zsh. Changes apply to new panes; splits start in the current pane's directory.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Interaction") {
                 Picker("Scrollback", selection: $preferences.value.scrollback) {
@@ -118,6 +126,12 @@ struct PreferencesView: View {
                 Toggle("Audible terminal bell", isOn: $preferences.value.audibleBell)
             }
         }.formStyle(.grouped)
+            .onAppear(perform: validatePaths)
+            .onChange(of: focusedField) { _ in validatePaths() }
+    }
+    private func validatePaths() {
+        shellError = preferences.shellError
+        directoryError = preferences.directoryError
     }
     private var shortcuts: some View {
         Form {

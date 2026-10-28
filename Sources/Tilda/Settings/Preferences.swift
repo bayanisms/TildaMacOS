@@ -12,7 +12,7 @@ final class Preferences: ObservableObject {
     private static let loginPermissionKey = "loginPermissionAsked.v1"
     @Published var value: Configuration {
         didSet {
-            let validated = Self.validated(value)
+            let validated = Self.validated(value, checkFont: value.fontName != oldValue.fontName)
             if validated != value { value = validated }
             if !transient, let data = try? JSONEncoder().encode(validated) { defaults.set(data, forKey: "configuration.v1") }
         }
@@ -26,25 +26,25 @@ final class Preferences: ObservableObject {
     }
     var changeShortcut: ((Shortcut) -> Bool)?
     var shellError: String? {
-        guard !value.shell.isEmpty else { return nil }
-        let path = (value.shell as NSString).expandingTildeInPath
-        var directory: ObjCBool = false
-        return path.hasPrefix("/") && FileManager.default.fileExists(atPath: path, isDirectory: &directory)
-            && !directory.boolValue && FileManager.default.isExecutableFile(atPath: path)
-            ? nil : "Shell must be an executable file at an absolute path."
+        value.shell.isEmpty || TerminalUtilities.executablePath(value.shell) != nil ? nil : "Shell must be an executable file at an absolute path."
     }
     var directoryError: String? {
-        guard !value.directory.isEmpty else { return nil }
-        let path = (value.directory as NSString).expandingTildeInPath
-        var directory: ObjCBool = false
-        return path.hasPrefix("/") && FileManager.default.fileExists(atPath: path, isDirectory: &directory) && directory.boolValue
-            ? nil : "Directory not found. New panes will open in your home directory."
+        value.directory.isEmpty || TerminalUtilities.directoryPath(value.directory) != nil ? nil : "Directory not found. New tabs will open in the current pane's directory."
     }
 
-    private static func validated(_ value: Configuration) -> Configuration {
+    /// Fonts offered in Preferences, limited to those available on this Mac.
+    static let fonts = [("Menlo", "Menlo-Regular"), ("SF Mono", "SFMono-Regular"), ("Monaco", "Monaco"), ("Courier", "Courier")]
+        .filter { terminalFont($0.1, size: 13) != nil }
+
+    /// SF Mono is the system monospaced font and may not resolve by name.
+    static func terminalFont(_ name: String, size: Double) -> NSFont? {
+        NSFont(name: name, size: size) ?? (name == "SFMono-Regular" ? .monospacedSystemFont(ofSize: size, weight: .regular) : nil)
+    }
+
+    private static func validated(_ value: Configuration, checkFont: Bool = true) -> Configuration {
         var config = value
         config.sanitize()
-        if NSFont(name: config.fontName, size: config.fontSize) == nil { config.fontName = "Menlo-Regular" }
+        if checkFont && terminalFont(config.fontName, size: config.fontSize) == nil { config.fontName = "Menlo-Regular" }
         return config
     }
 

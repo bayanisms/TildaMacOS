@@ -5,7 +5,6 @@ final class DropdownContentView: NSView {
     private let content: NSView
     private var generation = 0
     private let animationKey = "dropdown"
-    private(set) var revealed = true
     var isAnimating: Bool { content.layer?.animation(forKey: animationKey) != nil }
     override var isFlipped: Bool { true }
 
@@ -28,7 +27,6 @@ final class DropdownContentView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func setRevealed(_ revealed: Bool, animated: Bool, completion: @escaping () -> Void = {}) {
-        self.revealed = revealed
         generation += 1
         let currentGeneration = generation
         layoutSubtreeIfNeeded()

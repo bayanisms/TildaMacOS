@@ -57,8 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard let self else { return }
             self.workspace.applyPreferences()
             self.panel.alphaValue = self.preferences.value.opacity
-            if self.visible { self.updatePanelFrame() }
-            else if !self.animationsEnabled && self.dropdown.isAnimating { self.finishTransition() }
+            if self.visible { self.updatePanelFrame() } else { self.stopAnimationIfDisabled() }
         }
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
@@ -76,8 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self.updatePanelFrame()
         })
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
-            guard let self, !self.animationsEnabled else { return }
-            self.finishTransition()
+            self?.stopAnimationIfDisabled()
         })
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             self?.preferences.refreshLoginStatus()
@@ -132,7 +130,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if panel.frame != frame {
             finishTransition()
             panel.setFrame(frame, display: true)
-        } else if !animationsEnabled && dropdown.isAnimating { finishTransition() }
+        } else { stopAnimationIfDisabled() }
+    }
+    private func stopAnimationIfDisabled() {
+        if !animationsEnabled && dropdown.isAnimating { finishTransition() }
     }
     private func finishTransition() {
         dropdown.setRevealed(visible, animated: false)
@@ -319,7 +320,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func shutdown() {
         guard !didShutDown else { return }
         didShutDown = true
-        finishTransition()
+        pendingHide = nil
         workspace.persist(); workspace.allSessions.forEach { $0.stop() }
         timer?.invalidate()
         subscription?.cancel()

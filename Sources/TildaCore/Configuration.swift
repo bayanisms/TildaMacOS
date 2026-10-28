@@ -70,4 +70,17 @@ public enum TerminalUtilities {
         }
         return value.hasPrefix("/") ? value : nil
     }
+    /// Expands `~` and returns the path if it names an existing directory by absolute path.
+    public static func directoryPath(_ value: String) -> String? {
+        let path = (value as NSString).expandingTildeInPath
+        var isDirectory: ObjCBool = false
+        return path.hasPrefix("/") && FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue ? path : nil
+    }
+    /// Expands `~` and returns the path if it names an executable regular file by absolute path.
+    public static func executablePath(_ value: String) -> String? {
+        let path = (value as NSString).expandingTildeInPath
+        var isDirectory: ObjCBool = false
+        return path.hasPrefix("/") && FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+            && !isDirectory.boolValue && FileManager.default.isExecutableFile(atPath: path) ? path : nil
+    }
 }
