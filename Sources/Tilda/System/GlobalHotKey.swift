@@ -3,10 +3,15 @@ import Carbon
 import SwiftUI
 import TildaCore
 
+enum HotKeyID {
+    static let toggle: UInt32 = 1
+    static let fullScreen: UInt32 = 2
+}
+
 final class GlobalHotKey {
-    private var reference: EventHotKeyRef?
+    private var references: [UInt32: EventHotKeyRef] = [:]
     private var handler: EventHandlerRef?
-    var action: (() -> Void)?
+    var actions: [UInt32: () -> Void] = [:]
     init() {
         var event = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(GetApplicationEventTarget(), { _, event, context in
@@ -14,42 +19,45 @@ final class GlobalHotKey {
             var identifier = EventHotKeyID()
             guard let event, GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil, MemoryLayout<EventHotKeyID>.size, nil, &identifier) == noErr,
                   identifier.signature == 0x54494C44 else { return OSStatus(eventNotHandledErr) }
-            Unmanaged<GlobalHotKey>.fromOpaque(context).takeUnretainedValue().action?()
+            Unmanaged<GlobalHotKey>.fromOpaque(context).takeUnretainedValue().actions[identifier.id]?()
             return noErr
         }, 1, &event, Unmanaged.passUnretained(self).toOpaque(), &handler)
     }
-    func register(_ shortcut: Shortcut) -> Bool {
+    func register(_ shortcut: Shortcut, id: UInt32) -> Bool {
         var newReference: EventHotKeyRef?
         let status = RegisterEventHotKey(shortcut.keyCode, shortcut.modifiers,
-                                        EventHotKeyID(signature: 0x54494C44, id: 1),
+                                        EventHotKeyID(signature: 0x54494C44, id: id),
                                         GetApplicationEventTarget(), 0, &newReference)
-        guard status == noErr else { return false }
-        if let reference { UnregisterEventHotKey(reference) }
-        reference = newReference
+        guard status == noErr, let newReference else { return false }
+        if let old = references[id] { UnregisterEventHotKey(old) }
+        references[id] = newReference
         return true
     }
     deinit {
-        if let reference { UnregisterEventHotKey(reference) }
+        references.values.forEach { UnregisterEventHotKey($0) }
         if let handler { RemoveEventHandler(handler) }
     }
 }
 
 struct ShortcutRecorder: NSViewRepresentable {
     var preferences: Preferences
+    var keyPath: WritableKeyPath<Configuration, Shortcut> = \.shortcut
     func makeNSView(context: Context) -> RecorderButton {
         let button = RecorderButton()
         button.bezelStyle = .rounded
         button.preferences = preferences
+        button.keyPath = keyPath
         button.target = button; button.action = #selector(RecorderButton.record)
         return button
     }
     func updateNSView(_ button: RecorderButton, context: Context) {
-        if !button.recording { button.title = preferences.value.shortcut.label }
+        if !button.recording { button.title = preferences.value[keyPath: keyPath].label }
     }
 }
 
 final class RecorderButton: NSButton {
     weak var preferences: Preferences?
+    var keyPath: WritableKeyPath<Configuration, Shortcut> = \.shortcut
     var recording = false
     override var acceptsFirstResponder: Bool { true }
     @objc func record() {
@@ -57,7 +65,7 @@ final class RecorderButton: NSButton {
         window?.makeFirstResponder(self)
     }
     override func resignFirstResponder() -> Bool {
-        recording = false; title = preferences?.value.shortcut.label ?? "Set shortcut"
+        recording = false; title = preferences?.value[keyPath: keyPath].label ?? "Set shortcut"
         return super.resignFirstResponder()
     }
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -81,8 +89,11 @@ final class RecorderButton: NSButton {
         let functions: [UInt16: String] = [122:"F1",120:"F2",99:"F3",118:"F4",96:"F5",97:"F6",98:"F7",100:"F8",101:"F9",109:"F10",103:"F11",111:"F12",105:"F13",107:"F14",113:"F15",106:"F16",64:"F17",79:"F18",80:"F19",90:"F20"]
         label += functions[event.keyCode] ?? [49:"Space",48:"Tab",36:"Return",123:"←",124:"→",125:"↓",126:"↑" ][event.keyCode] ?? event.charactersIgnoringModifiers?.uppercased() ?? "Key \(event.keyCode)"
         let shortcut = Shortcut(keyCode: UInt32(event.keyCode), modifiers: carbon, label: label)
-        if shortcut == preferences.value.shortcut || preferences.changeShortcut?(shortcut) == true {
-            preferences.value.shortcut = shortcut; preferences.shortcutError = nil
+        let other: WritableKeyPath<Configuration, Shortcut> = keyPath == \.shortcut ? \.fullScreenShortcut : \.shortcut
+        if shortcut == preferences.value[keyPath: other] {
+            preferences.shortcutError = "Tilda already uses that shortcut. Try another combination."
+        } else if shortcut == preferences.value[keyPath: keyPath] || preferences.changeShortcut?(shortcut, keyPath) == true {
+            preferences.value[keyPath: keyPath] = shortcut; preferences.shortcutError = nil
         } else { preferences.shortcutError = "That shortcut is unavailable. Try another combination." }
         _ = resignFirstResponder()
     }

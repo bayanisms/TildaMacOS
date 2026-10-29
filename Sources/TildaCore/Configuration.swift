@@ -31,7 +31,27 @@ public struct Configuration: Codable, Equatable {
     public var optionAsMeta = true
     public var audibleBell = false
     public var shortcut = Shortcut()
+    public var fullScreenShortcut = Shortcut(keyCode: 50, modifiers: 4608, label: "⌃⇧`")
+    public var dropdownDuration: Double = 0.25
+    public var fullScreenDuration: Double = 0.25
     public init() {}
+
+    /// Missing or invalid keys fall back to defaults so older saved settings keep loading.
+    public init(from decoder: Decoder) throws {
+        self.init()
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        func load<T: Decodable>(_ key: CodingKeys, _ value: inout T) {
+            if let decoded = try? container.decodeIfPresent(T.self, forKey: key) { value = decoded }
+        }
+        load(.width, &width); load(.height, &height); load(.opacity, &opacity)
+        load(.fontName, &fontName); load(.fontSize, &fontSize); load(.theme, &theme); load(.cursor, &cursor)
+        load(.scrollback, &scrollback); load(.shell, &shell); load(.directory, &directory)
+        load(.followMouse, &followMouse); load(.autoHide, &autoHide); load(.escapeHides, &escapeHides)
+        load(.animate, &animate); load(.startHidden, &startHidden); load(.restoreSessions, &restoreSessions)
+        load(.confirmClose, &confirmClose); load(.optionAsMeta, &optionAsMeta); load(.audibleBell, &audibleBell)
+        load(.shortcut, &shortcut); load(.fullScreenShortcut, &fullScreenShortcut)
+        load(.dropdownDuration, &dropdownDuration); load(.fullScreenDuration, &fullScreenDuration)
+    }
 
     public mutating func sanitize() {
         width = width.isFinite ? min(1, max(0.4, width)) : 0.92
@@ -39,6 +59,8 @@ public struct Configuration: Codable, Equatable {
         opacity = opacity.isFinite ? min(1, max(0.75, opacity)) : 0.98
         fontSize = fontSize.isFinite ? min(32, max(10, fontSize)) : 13
         scrollback = min(100_000, max(1_000, scrollback))
+        dropdownDuration = dropdownDuration.isFinite ? min(1, max(0.05, dropdownDuration)) : 0.25
+        fullScreenDuration = fullScreenDuration.isFinite ? min(1, max(0.05, fullScreenDuration)) : 0.25
         if !["Midnight", "Nord", "Dracula", "Daylight"].contains(theme) { theme = "Midnight" }
         if !["Bar", "Block", "Underline"].contains(cursor) { cursor = "Bar" }
     }

@@ -49,9 +49,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.contentView = dropdown
         workspace.hide = { [weak self] in self?.hide() }
         workspace.showPreferences = { [weak self] in self?.openPreferences() }
-        hotKey.action = { [weak self] in self?.toggle() }
-        preferences.changeShortcut = { [weak self] in self?.hotKey.register($0) ?? false }
-        if !hotKey.register(preferences.value.shortcut) { preferences.shortcutError = "Your saved shortcut is in use. Set another in General. The menu bar button always works." }
+        workspace.toggleFullScreen = { [weak self] in self?.toggleFullScreen() }
+        hotKey.actions[HotKeyID.toggle] = { [weak self] in self?.toggle() }
+        hotKey.actions[HotKeyID.fullScreen] = { [weak self] in self?.toggleFullScreen() }
+        preferences.changeShortcut = { [weak self] shortcut, keyPath in
+            self?.hotKey.register(shortcut, id: keyPath == \Configuration.fullScreenShortcut ? HotKeyID.fullScreen : HotKeyID.toggle) ?? false
+        }
+        var hotKeyErrors: [String] = []
+        if !hotKey.register(preferences.value.shortcut, id: HotKeyID.toggle) {
+            hotKeyErrors.append("Your saved show / hide shortcut is in use. Set another in General. The menu bar button always works.")
+        }
+        if !hotKey.register(preferences.value.fullScreenShortcut, id: HotKeyID.fullScreen) {
+            hotKeyErrors.append("Your saved full screen shortcut is in use. Set another in General.")
+        }
+        if !hotKeyErrors.isEmpty { preferences.shortcutError = hotKeyErrors.joined(separator: " ") }
         workspace.restore()
         subscription = preferences.$value.dropFirst().debounce(for: .milliseconds(100), scheduler: RunLoop.main).sink { [weak self] _ in
             guard let self else { return }
@@ -64,7 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return self.handleKey(event)
         }
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] notification in
-            guard let self, self.visible, self.preferences.value.autoHide, !self.workspace.pinned,
+            guard let self, self.visible, self.preferences.value.autoHide,
                   self.settings?.isVisible != true, self.panel.attachedSheet == nil, NSApp.modalWindow == nil,
                   let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
                   app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
@@ -118,15 +129,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    func targetFrame() -> NSRect {
+    /// The display the panel opens on: under the pointer when Follow Mouse is on, else the primary display.
+    private func showScreen() -> NSScreen? {
         let screen = preferences.value.followMouse
             ? NSScreen.screens.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) })
             : NSScreen.screens.first
-        return TerminalUtilities.panelFrame(visibleFrame: (screen ?? NSScreen.main)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900), width: preferences.value.width, height: preferences.value.height)
+        return screen ?? NSScreen.main
+    }
+    /// Full screen fills the display's visible area; otherwise the configured dropdown size.
+    private func frame(on screen: NSScreen?) -> NSRect {
+        let visibleFrame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        if workspace.fullScreen { return visibleFrame }
+        return TerminalUtilities.panelFrame(visibleFrame: visibleFrame, width: preferences.value.width, height: preferences.value.height)
     }
     @objc func toggle() { visible && panel.isKeyWindow ? hide() : show() }
+    @objc func toggleFullScreen() {
+        guard visible else { workspace.fullScreen = true; show(); return }
+        workspace.fullScreen.toggle()
+        let target = frame(on: panel.screen ?? showScreen())
+        if animationsEnabled {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = preferences.value.fullScreenDuration
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                panel.animator().setFrame(target, display: true)
+            }
+        } else { panel.setFrame(target, display: true) }
+        panel.makeKeyAndOrderFront(nil)
+        workspace.focus()
+    }
     private func updatePanelFrame() {
-        let frame = targetFrame()
+        let frame = frame(on: panel.screen ?? showScreen())
         if panel.frame != frame {
             finishTransition()
             panel.setFrame(frame, display: true)
@@ -148,7 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if NSApp.isHidden { NSApp.unhideWithoutActivation() }
         if !panel.isVisible, let frontmost = NSWorkspace.shared.frontmostApplication,
            frontmost.processIdentifier != ProcessInfo.processInfo.processIdentifier { previousApp = frontmost }
-        let frame = targetFrame()
+        let frame = frame(on: showScreen())
         let wasVisible = visible
         let wasOrdered = panel.isVisible
         visible = true
@@ -161,7 +193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.makeKeyAndOrderFront(nil)
         if !wasVisible || !wasOrdered {
             panel.hasShadow = false
-            dropdown.setRevealed(true, animated: animationsEnabled) { [weak self] in
+            dropdown.setRevealed(true, animated: animationsEnabled, duration: preferences.value.dropdownDuration) { [weak self] in
                 guard let self, self.visible else { return }
                 self.panel.hasShadow = true
             }
@@ -180,7 +212,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             if restoreFocus, self.previousApp?.isTerminated == false { self.previousApp?.activate(options: []) }
         }
         pendingHide = finish
-        dropdown.setRevealed(false, animated: animationsEnabled) { [weak self] in
+        dropdown.setRevealed(false, animated: animationsEnabled, duration: preferences.value.dropdownDuration) { [weak self] in
             self?.pendingHide = nil
             finish()
         }
@@ -201,7 +233,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard notification.object as? NSWindow === panel else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self, self.visible, !self.panel.isKeyWindow,
-                  self.preferences.value.autoHide, !self.workspace.pinned,
+                  self.preferences.value.autoHide,
                   self.settings?.isVisible != true, self.panel.attachedSheet == nil, NSApp.modalWindow == nil else { return }
             self.hide(restoreFocus: false)
         }
@@ -268,6 +300,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let terminalMenu = NSMenu(title: "Terminal")
         terminalMenu.addItem(item("Show Terminal", #selector(showFromMenu), ""))
         terminalMenu.addItem(item("New Tab", #selector(newTabFromMenu), "t"))
+        terminalMenu.addItem(item("Toggle Full Screen", #selector(toggleFullScreen), ""))
         terminalMenu.addItem(item("Save Scrollback…", #selector(export), ""))
         let terminalRoot = NSMenuItem(title: "Terminal", action: nil, keyEquivalent: "")
         terminalRoot.submenu = terminalMenu; menu.addItem(terminalRoot)
@@ -281,6 +314,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         statusItem.button?.image = NSImage(systemSymbolName: "terminal", accessibilityDescription: "Tilda")
         let statusMenu = NSMenu()
         statusMenu.addItem(item("Show / Hide Tilda", #selector(toggle), ""))
+        statusMenu.addItem(item("Toggle Full Screen", #selector(toggleFullScreen), ""))
         statusMenu.addItem(item("New Tab", #selector(newTabFromMenu), ""))
         statusMenu.addItem(.separator())
         statusMenu.addItem(item("Save Scrollback…", #selector(export), ""))

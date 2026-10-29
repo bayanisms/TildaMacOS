@@ -24,7 +24,7 @@ final class Preferences: ObservableObject {
     var shouldAskForLoginPermission: Bool {
         !transient && !defaults.bool(forKey: Self.loginPermissionKey) && loginStatus != .enabled
     }
-    var changeShortcut: ((Shortcut) -> Bool)?
+    var changeShortcut: ((Shortcut, WritableKeyPath<Configuration, Shortcut>) -> Bool)?
     var shellError: String? {
         value.shell.isEmpty || TerminalUtilities.executablePath(value.shell) != nil ? nil : "Shell must be an executable file at an absolute path."
     }

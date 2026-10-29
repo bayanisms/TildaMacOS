@@ -26,7 +26,7 @@ final class DropdownContentView: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func setRevealed(_ revealed: Bool, animated: Bool, completion: @escaping () -> Void = {}) {
+    func setRevealed(_ revealed: Bool, animated: Bool, duration: TimeInterval = 0.25, completion: @escaping () -> Void = {}) {
         generation += 1
         let currentGeneration = generation
         layoutSubtreeIfNeeded()
@@ -41,7 +41,7 @@ final class DropdownContentView: NSView {
             let animation = CABasicAnimation(keyPath: "transform.translation.y")
             animation.fromValue = from
             animation.toValue = to
-            animation.duration = max(0.08, (revealed ? 0.26 : 0.22) * min(1, abs(from - to) / max(1, bounds.height)))
+            animation.duration = max(0.04, duration * min(1, abs(from - to) / max(1, bounds.height)))
             animation.timingFunction = CAMediaTimingFunction(name: revealed ? .easeOut : .easeIn)
             CATransaction.setCompletionBlock { [weak self] in
                 guard let self, self.generation == currentGeneration else { return }

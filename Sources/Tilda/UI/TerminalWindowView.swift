@@ -7,6 +7,8 @@ struct TerminalWindowView: View {
     @FocusState private var searchFocused: Bool
     private var theme: TerminalTheme { .named(preferences.value.theme) }
     private var muted: Color { Color(nsColor: theme.foreground).opacity(0.5) }
+    /// Pinned means the panel stays open when another app becomes active.
+    private var pinned: Bool { !preferences.value.autoHide }
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 14) {
@@ -30,7 +32,11 @@ struct TerminalWindowView: View {
                         Button("Next Pane", action: workspace.cyclePane)
                     } label: { Image(systemName: "rectangle.split.2x1").frame(width: 27, height: 28) }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Split terminal")
-                    tool(workspace.pinned ? "pin.fill" : "pin", help: "Keep open when focus changes", active: workspace.pinned) { workspace.pinned.toggle() }
+                    tool(pinned ? "pin.fill" : "pin", help: pinned ? "Unpin (hide when another app is active)" : "Pin (stay open when another app is active)", active: pinned) {
+                        preferences.value.autoHide.toggle()
+                    }
+                    tool(workspace.fullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                         help: "\(workspace.fullScreen ? "Exit full screen" : "Full screen") · \(preferences.value.fullScreenShortcut.label)") { workspace.toggleFullScreen?() }
                     tool("gearshape", help: "Preferences · ⌘,") { workspace.showPreferences?() }
                     tool("chevron.up", help: "Hide · \(preferences.value.shortcut.label)") { workspace.hide?() }
                 }.padding(.trailing, 12)
@@ -58,8 +64,8 @@ struct TerminalWindowView: View {
         }
         .foregroundStyle(Color(nsColor: theme.foreground))
         .background(Color(nsColor: theme.background))
-        .clipShape(UnevenBottomCorners())
-        .overlay(UnevenBottomCorners().strokeBorder(Color(nsColor: theme.foreground).opacity(0.12), lineWidth: 1))
+        .clipShape(UnevenBottomCorners(radius: workspace.fullScreen ? 0 : 13))
+        .overlay(UnevenBottomCorners(radius: workspace.fullScreen ? 0 : 13).strokeBorder(Color(nsColor: theme.foreground).opacity(0.12), lineWidth: 1))
         .onChange(of: workspace.searchVisible) { visible in if visible { searchFocused = true } }
     }
     private var divider: some View { Rectangle().fill(muted.opacity(0.18)).frame(height: 1) }
@@ -105,11 +111,12 @@ struct TerminalWindowView: View {
 }
 
 private struct UnevenBottomCorners: InsettableShape {
+    var radius: CGFloat = 13
     var insetAmount: CGFloat = 0
     func inset(by amount: CGFloat) -> some InsettableShape { var shape = self; shape.insetAmount += amount; return shape }
     func path(in rect: CGRect) -> Path {
         let r = rect.insetBy(dx: insetAmount, dy: insetAmount)
-        let radius = max(0, 13 - insetAmount)
+        let radius = max(0, radius - insetAmount)
         var p = Path()
         p.move(to: CGPoint(x: r.minX, y: r.minY)); p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
         p.addLine(to: CGPoint(x: r.maxX, y: r.maxY - radius))

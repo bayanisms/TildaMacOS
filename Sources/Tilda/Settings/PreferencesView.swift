@@ -46,15 +46,25 @@ struct PreferencesView: View {
         Form {
             Section("Window behavior") {
                 HStack {
-                    Text("Global shortcut")
+                    Text("Show / hide shortcut")
                     Spacer()
                     ShortcutRecorder(preferences: preferences).frame(width: 155, height: 28)
+                }
+                HStack {
+                    Text("Full screen shortcut")
+                    Spacer()
+                    ShortcutRecorder(preferences: preferences, keyPath: \.fullScreenShortcut).frame(width: 155, height: 28)
                 }
                 if let error = preferences.shortcutError { Text(error).font(.caption).foregroundStyle(.red) }
                 Toggle("Open on the display under the pointer", isOn: $preferences.value.followMouse)
                 Toggle("Hide when another app becomes active", isOn: $preferences.value.autoHide)
+                Text("The pin button in the terminal toolbar turns this off.").font(.caption).foregroundStyle(.secondary)
                 Toggle("Escape hides Tilda at an idle shell prompt", isOn: $preferences.value.escapeHides)
-                Toggle("Animate the dropdown", isOn: $preferences.value.animate)
+                Toggle("Animate showing, hiding, and full screen", isOn: $preferences.value.animate)
+                if preferences.value.animate {
+                    durationSlider("Dropdown", value: $preferences.value.dropdownDuration)
+                    durationSlider("Full screen", value: $preferences.value.fullScreenDuration)
+                }
                 if reduceMotion && preferences.value.animate {
                     Text("Animation is disabled by macOS Reduce Motion.").font(.caption).foregroundStyle(.secondary)
                 }
@@ -100,6 +110,13 @@ struct PreferencesView: View {
             Text("\(Int(value.wrappedValue * 100))%").monospacedDigit().frame(width: 42, alignment: .trailing).foregroundStyle(.secondary)
         }
     }
+    private func durationSlider(_ title: String, value: Binding<Double>) -> some View {
+        HStack {
+            Text(title).frame(width: 80, alignment: .leading)
+            Slider(value: value, in: 0.05...1, step: 0.05)
+            Text(String(format: "%.2f s", value.wrappedValue)).monospacedDigit().frame(width: 52, alignment: .trailing).foregroundStyle(.secondary)
+        }
+    }
     private var terminal: some View {
         Form {
             Section("New shells") {
@@ -137,6 +154,7 @@ struct PreferencesView: View {
         Form {
             Section("Terminal") {
                 shortcut("Show / hide", preferences.value.shortcut.label)
+                shortcut("Full screen", preferences.value.fullScreenShortcut.label)
                 shortcut("New tab / close pane", "⌘T / ⌘W")
                 shortcut("Select tab", "⌘1 … ⌘9")
                 shortcut("Previous / next tab", "⌘⇧[ / ⌘⇧]")

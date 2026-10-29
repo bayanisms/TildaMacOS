@@ -14,7 +14,7 @@ struct TerminalTab: Identifiable {
 final class Workspace: ObservableObject {
     @Published var tabs: [TerminalTab] = []
     @Published var selectedTab: UUID?
-    @Published var pinned = false
+    @Published var fullScreen = false
     @Published var searchVisible = false
     @Published var searchQuery = ""
     @Published var caseSensitive = false
@@ -23,6 +23,7 @@ final class Workspace: ObservableObject {
     let preferences: Preferences
     var showPreferences: (() -> Void)?
     var hide: (() -> Void)?
+    var toggleFullScreen: (() -> Void)?
     var activeTab: TerminalTab? { tabs.first { $0.id == selectedTab } }
     var activeSession: TerminalSession? { activeTab.flatMap { tab in tab.sessions.first { $0.id == tab.selected } } }
     var allSessions: [TerminalSession] { tabs.flatMap(\.sessions) }
