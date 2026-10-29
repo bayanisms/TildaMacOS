@@ -8,7 +8,8 @@ struct TerminalTab: Identifiable {
     var sessions: [TerminalSession]
     var selected: UUID
     var vertical = true
-    var title: String { sessions.first(where: { $0.id == selected })?.title ?? "Shell" }
+    var customTitle: String?
+    var title: String { customTitle ?? sessions.first(where: { $0.id == selected })?.title ?? "Shell" }
 }
 
 final class Workspace: ObservableObject {
@@ -40,6 +41,10 @@ final class Workspace: ObservableObject {
             self.tabs[index].selected = session.id
             self.selectedTab = self.tabs[index].id
         }
+        session.view.menuProvider = { [weak self, weak session] in
+            guard let self, let session else { return nil }
+            return self.contextMenu(for: session)
+        }
         return session
     }
 
@@ -49,7 +54,7 @@ final class Workspace: ObservableObject {
            let saved = try? JSONDecoder().decode([SavedTab].self, from: data) {
             for tab in saved.prefix(12) where !tab.directories.isEmpty {
                 let sessions = tab.directories.prefix(4).map { session(directory: $0) }
-                tabs.append(TerminalTab(sessions: sessions, selected: sessions[0].id, vertical: tab.vertical))
+                tabs.append(TerminalTab(sessions: sessions, selected: sessions[0].id, vertical: tab.vertical, customTitle: tab.title))
             }
         }
         if tabs.isEmpty { newTab() }
@@ -58,16 +63,23 @@ final class Workspace: ObservableObject {
     func persist() {
         allSessions.forEach { $0.refreshDirectory() }
         guard !preferences.transient else { return }
-        let saved = tabs.map { SavedTab(directories: $0.sessions.map(\.directory), vertical: $0.vertical) }
+        let saved = tabs.map { SavedTab(directories: $0.sessions.map(\.directory), vertical: $0.vertical, title: $0.customTitle) }
         if let data = try? JSONEncoder().encode(saved) { preferences.defaults.set(data, forKey: "sessions.v1") }
     }
-    func newTab() {
+    func newTab(directory: String? = nil) {
         guard tabs.count < 12 else { NSSound.beep(); return }
         activeSession?.refreshDirectory()
-        let pane = session(directory: TerminalUtilities.directoryPath(preferences.value.directory) ?? activeSession?.directory)
+        let pane = session(directory: directory.flatMap(TerminalUtilities.directoryPath)
+            ?? TerminalUtilities.directoryPath(preferences.value.directory) ?? activeSession?.directory)
         let tab = TerminalTab(sessions: [pane], selected: pane.id)
         tabs.append(tab); selectedTab = tab.id
         focus(); persist()
+    }
+    func renameTab(_ id: UUID, to title: String?) {
+        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        tabs[index].customTitle = trimmed?.isEmpty == false ? String(trimmed!.prefix(100)) : nil
+        persist()
     }
     func split(vertical: Bool) {
         guard let index = tabs.firstIndex(where: { $0.id == selectedTab }), tabs[index].sessions.count < 4 else { NSSound.beep(); return }

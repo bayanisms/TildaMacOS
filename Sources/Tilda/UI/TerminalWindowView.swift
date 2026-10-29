@@ -1,10 +1,14 @@
 import AppKit
 import SwiftUI
+import TildaCore
 
 struct TerminalWindowView: View {
     @ObservedObject var workspace: Workspace
     @ObservedObject var preferences: Preferences
     @FocusState private var searchFocused: Bool
+    @FocusState private var renameFocused: Bool
+    @State private var renaming: UUID?
+    @State private var renameText = ""
     private var theme: TerminalTheme { .named(preferences.value.theme) }
     private var muted: Color { Color(nsColor: theme.foreground).opacity(0.5) }
     /// Pinned means the panel stays open when another app becomes active.
@@ -36,9 +40,9 @@ struct TerminalWindowView: View {
                         preferences.value.autoHide.toggle()
                     }
                     tool(workspace.fullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
-                         help: "\(workspace.fullScreen ? "Exit full screen" : "Full screen") · \(preferences.value.fullScreenShortcut.label)") { workspace.toggleFullScreen?() }
+                         help: (workspace.fullScreen ? "Exit full screen" : "Full screen") + Self.keys(preferences.value.fullScreenShortcut)) { workspace.toggleFullScreen?() }
                     tool("gearshape", help: "Preferences · ⌘,") { workspace.showPreferences?() }
-                    tool("chevron.up", help: "Hide · \(preferences.value.shortcut.label)") { workspace.hide?() }
+                    tool("chevron.up", help: "Hide" + Self.keys(preferences.value.shortcut)) { workspace.hide?() }
                 }.padding(.trailing, 12)
             }.frame(height: 52).background(Color(nsColor: theme.foreground).opacity(0.025))
             divider
@@ -58,8 +62,10 @@ struct TerminalWindowView: View {
                 if let pane = workspace.activeSession {
                     Text("\(pane.columns) × \(pane.rows)").font(.system(size: 10, design: .monospaced)).monospacedDigit()
                 }
-                Text(preferences.value.shortcut.label).font(.system(size: 10, design: .monospaced))
-                    .padding(.horizontal, 6).padding(.vertical, 2).background(muted.opacity(0.1), in: RoundedRectangle(cornerRadius: 4))
+                if !preferences.value.shortcut.isDisabled {
+                    Text(preferences.value.shortcut.label).font(.system(size: 10, design: .monospaced))
+                        .padding(.horizontal, 6).padding(.vertical, 2).background(muted.opacity(0.1), in: RoundedRectangle(cornerRadius: 4))
+                }
             }.foregroundStyle(muted).padding(.horizontal, 19).frame(height: 30)
         }
         .foregroundStyle(Color(nsColor: theme.foreground))
@@ -77,19 +83,52 @@ struct TerminalWindowView: View {
     private func tabButton(_ tab: TerminalTab, index: Int) -> some View {
         let selected = tab.id == workspace.selectedTab
         return HStack(spacing: 7) {
-            Button { workspace.selectTab(tab.id) } label: {
+            if renaming == tab.id {
                 HStack(spacing: 7) {
                     Image(systemName: tab.sessions.count > 1 ? "rectangle.split.2x1" : "terminal").font(.system(size: 11))
-                    Text(tab.title).font(.system(size: 11, weight: selected ? .medium : .regular)).lineLimit(1).frame(maxWidth: 140)
-                    if index < 9 { Text("\(index + 1)").font(.system(size: 9, design: .monospaced)).opacity(0.35) }
-                }.padding(.leading, 10).padding(.vertical, 8).contentShape(Rectangle())
-            }.buttonStyle(.plain)
+                    TextField("Tab name", text: $renameText)
+                        .textFieldStyle(.plain).font(.system(size: 11, weight: .medium)).frame(width: 140)
+                        .focused($renameFocused)
+                        .onSubmit { finishRename(tab.id) }
+                        .onExitCommand { renaming = nil; workspace.focus() }
+                        .onChange(of: renameFocused) { focused in if !focused && renaming == tab.id { finishRename(tab.id) } }
+                }.padding(.leading, 10).padding(.vertical, 8)
+            } else {
+                Button { workspace.selectTab(tab.id) } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: tab.sessions.count > 1 ? "rectangle.split.2x1" : "terminal").font(.system(size: 11))
+                        Text(tab.title).font(.system(size: 11, weight: selected ? .medium : .regular)).lineLimit(1).frame(maxWidth: 140)
+                        if index < 9 { Text("\(index + 1)").font(.system(size: 9, design: .monospaced)).opacity(0.35) }
+                    }.padding(.leading, 10).padding(.vertical, 8).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                .simultaneousGesture(TapGesture(count: 2).onEnded { startRename(tab) })
+            }
             Button { workspace.closeTab(tab.id) } label: { Image(systemName: "xmark").font(.system(size: 8)).frame(width: 20, height: 24) }
                 .buttonStyle(.plain).help("Close tab")
+        }
+        .contextMenu {
+            Button("Rename Tab…") { startRename(tab) }
+            if tab.customTitle != nil { Button("Reset Name") { workspace.renameTab(tab.id, to: nil) } }
+            Divider()
+            Button("New Tab") { workspace.newTab() }
+            Button("Close Tab") { workspace.closeTab(tab.id) }
         }
         .foregroundStyle(selected ? Color(nsColor: theme.foreground) : muted)
         .background(selected ? Color(nsColor: theme.foreground).opacity(0.075) : .clear, in: RoundedRectangle(cornerRadius: 7))
         .overlay(alignment: .bottom) { if selected { Capsule().fill(Color(nsColor: theme.accent)).frame(height: 2).padding(.horizontal, 12) } }
+    }
+    private static func keys(_ shortcut: Shortcut) -> String { shortcut.isDisabled ? "" : " · " + shortcut.label }
+    private func startRename(_ tab: TerminalTab) {
+        if workspace.selectedTab != tab.id { workspace.selectTab(tab.id) }
+        renameText = tab.title
+        renaming = tab.id
+        DispatchQueue.main.async { renameFocused = true }
+    }
+    private func finishRename(_ id: UUID) {
+        guard renaming == id else { return }
+        renaming = nil
+        workspace.renameTab(id, to: renameText)
+        workspace.focus()
     }
     private var searchBar: some View {
         HStack(spacing: 10) {

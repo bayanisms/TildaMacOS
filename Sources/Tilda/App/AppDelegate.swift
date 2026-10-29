@@ -53,13 +53,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         hotKey.actions[HotKeyID.toggle] = { [weak self] in self?.toggle() }
         hotKey.actions[HotKeyID.fullScreen] = { [weak self] in self?.toggleFullScreen() }
         preferences.changeShortcut = { [weak self] shortcut, keyPath in
-            self?.hotKey.register(shortcut, id: keyPath == \Configuration.fullScreenShortcut ? HotKeyID.fullScreen : HotKeyID.toggle) ?? false
+            guard let self else { return false }
+            let id = keyPath == \Configuration.fullScreenShortcut ? HotKeyID.fullScreen : HotKeyID.toggle
+            if shortcut.isDisabled { self.hotKey.unregister(id: id); return true }
+            return self.hotKey.register(shortcut, id: id)
         }
         var hotKeyErrors: [String] = []
-        if !hotKey.register(preferences.value.shortcut, id: HotKeyID.toggle) {
+        if !preferences.value.shortcut.isDisabled && !hotKey.register(preferences.value.shortcut, id: HotKeyID.toggle) {
             hotKeyErrors.append("Your saved show / hide shortcut is in use. Set another in General. The menu bar button always works.")
         }
-        if !hotKey.register(preferences.value.fullScreenShortcut, id: HotKeyID.fullScreen) {
+        if !preferences.value.fullScreenShortcut.isDisabled && !hotKey.register(preferences.value.fullScreenShortcut, id: HotKeyID.fullScreen) {
             hotKeyErrors.append("Your saved full screen shortcut is in use. Set another in General.")
         }
         if !hotKeyErrors.isEmpty { preferences.shortcutError = hotKeyErrors.joined(separator: " ") }
@@ -95,6 +98,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard let self, self.visible else { return }
             self.workspace.activeSession?.refreshDirectory()
         }
+        NSApp.servicesProvider = self
+        NSUpdateDynamicServices()
+        if preferences.value.rememberFullScreen && !preferences.transient && preferences.defaults.bool(forKey: "fullScreen.v1") {
+            workspace.fullScreen = true
+        }
         if !preferences.value.startHidden { show() }
         if !preferences.transient && ProcessInfo.processInfo.arguments.contains("--settings") { openPreferences() }
         if preferences.shouldAskForLoginPermission {
@@ -129,8 +137,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    /// The display the panel opens on: under the pointer when Follow Mouse is on, else the primary display.
+    /// The display the panel opens on: the chosen display if connected, else under the pointer
+    /// when Follow Mouse is on, else the primary display.
     private func showScreen() -> NSScreen? {
+        let name = preferences.value.displayName
+        if !name.isEmpty, let chosen = NSScreen.screens.first(where: { $0.localizedName == name }) { return chosen }
         let screen = preferences.value.followMouse
             ? NSScreen.screens.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) })
             : NSScreen.screens.first
@@ -140,10 +151,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func frame(on screen: NSScreen?) -> NSRect {
         let visibleFrame = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         if workspace.fullScreen { return visibleFrame }
-        return TerminalUtilities.panelFrame(visibleFrame: visibleFrame, width: preferences.value.width, height: preferences.value.height)
+        return TerminalUtilities.panelFrame(visibleFrame: visibleFrame, width: preferences.value.width, height: preferences.value.height, position: preferences.value.position)
     }
     @objc func toggle() { visible && panel.isKeyWindow ? hide() : show() }
     @objc func toggleFullScreen() {
+        defer { if !preferences.transient { preferences.defaults.set(workspace.fullScreen, forKey: "fullScreen.v1") } }
         guard visible else { workspace.fullScreen = true; show(); return }
         workspace.fullScreen.toggle()
         let target = frame(on: panel.screen ?? showScreen())
@@ -257,6 +269,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             case "0": preferences.value.fontSize = 13
             case "[", "{": workspace.cycleTab(-1)
             case "]", "}": workspace.cycleTab(1)
+            case "\r" where flags == [.command]: toggleFullScreen()
             default:
                 if event.keyCode == 124 && flags.contains(.option) { workspace.cyclePane() }
                 else if let index = Int(key), (1...9).contains(index), workspace.tabs.count >= index { workspace.selectTab(workspace.tabs[index - 1].id) }
@@ -335,6 +348,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.target = self; return item
     }
     @objc func newTabFromMenu() { workspace.newTab(); show() }
+    /// Finder service: opens a tab in the selected folder, or in the folder containing the selected file.
+    @objc func newTabHere(_ pasteboard: NSPasteboard, userData: String?, error: AutoreleasingUnsafeMutablePointer<NSString?>) {
+        let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        guard !urls.isEmpty else { error.pointee = "No folder selected."; return }
+        for url in urls.prefix(9) {
+            let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+            workspace.newTab(directory: (isDirectory ? url : url.deletingLastPathComponent()).path)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        show()
+    }
     @objc func showFromMenu() { show() }
     @objc func export() { show(); workspace.exportScrollback() }
     @objc func quit() { NSApp.terminate(nil) }

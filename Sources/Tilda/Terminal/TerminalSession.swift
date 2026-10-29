@@ -78,6 +78,7 @@ final class TerminalSession: NSObject, Identifiable, LocalProcessTerminalViewDel
         })
         let cursor: CursorStyle = configuration.cursor == "Block" ? .steadyBlock : configuration.cursor == "Underline" ? .steadyUnderline : .blinkBar
         view.getTerminal().setCursorStyle(cursor)
+        view.copyOnSelect = configuration.copyOnSelect
         view.needsDisplay = true
     }
 
@@ -142,12 +143,37 @@ final class TerminalSession: NSObject, Identifiable, LocalProcessTerminalViewDel
 
 final class ShellTerminalView: LocalProcessTerminalView {
     var onFocus: (() -> Void)?
+    var copyOnSelect = false
+    var menuProvider: (() -> NSMenu?)?
     override func hitTest(_ point: NSPoint) -> NSView? {
         let result = super.hitTest(point)
         if result != nil && NSApp.currentEvent?.type == .leftMouseDown {
             DispatchQueue.main.async { [weak self] in self?.onFocus?() }
         }
         return result
+    }
+    override func menu(for event: NSEvent) -> NSMenu? {
+        onFocus?()
+        window?.makeFirstResponder(self)
+        return menuProvider?()
+    }
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+        if copyOnSelect, let text = getSelection(), !text.isEmpty {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        }
+    }
+    override func otherMouseDown(with event: NSEvent) {
+        guard event.buttonNumber == 2 else { return super.otherMouseDown(with: event) }
+        onFocus?()
+        window?.makeFirstResponder(self)
+        paste(self)
+    }
+    /// Pastes the clipboard as plain shell text; see `TerminalUtilities.cleanPaste`.
+    @objc func cleanPaste(_ sender: Any?) {
+        guard let text = NSPasteboard.general.string(forType: .string).map(TerminalUtilities.cleanPaste), !text.isEmpty else { return }
+        send(txt: getTerminal().bracketedPasteMode ? "\u{1b}[200~" + text + "\u{1b}[201~" : text)
     }
     override func requestOpenLink(source: TerminalView, link: String, params: [String : String]) {
         guard let url = URL(string: link), let scheme = url.scheme?.lowercased(),

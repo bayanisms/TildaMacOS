@@ -1,6 +1,7 @@
 import AppKit
 import ServiceManagement
 import SwiftUI
+import TildaCore
 
 struct PreferencesView: View {
     @ObservedObject var preferences: Preferences
@@ -49,14 +50,22 @@ struct PreferencesView: View {
                     Text("Show / hide shortcut")
                     Spacer()
                     ShortcutRecorder(preferences: preferences).frame(width: 155, height: 28)
+                    clearShortcut(\.shortcut)
                 }
                 HStack {
                     Text("Full screen shortcut")
                     Spacer()
                     ShortcutRecorder(preferences: preferences, keyPath: \.fullScreenShortcut).frame(width: 155, height: 28)
+                    clearShortcut(\.fullScreenShortcut)
                 }
                 if let error = preferences.shortcutError { Text(error).font(.caption).foregroundStyle(.red) }
-                Toggle("Open on the display under the pointer", isOn: $preferences.value.followMouse)
+                Picker("Display", selection: displaySelection) {
+                    Text("Display under pointer").tag(Self.pointerDisplay)
+                    Text("Primary display").tag(Self.primaryDisplay)
+                    ForEach(displayNames, id: \.self) { name in
+                        Text(NSScreen.screens.contains { $0.localizedName == name } ? name : "\(name) (not connected)").tag(name)
+                    }
+                }
                 Toggle("Hide when another app becomes active", isOn: $preferences.value.autoHide)
                 Text("The pin button in the terminal toolbar turns this off.").font(.caption).foregroundStyle(.secondary)
                 Toggle("Escape hides Tilda at an idle shell prompt", isOn: $preferences.value.escapeHides)
@@ -74,6 +83,7 @@ struct PreferencesView: View {
                 Toggle("Reopen tab layouts and working directories", isOn: $preferences.value.restoreSessions)
                 Text("Restores fresh shells, not running commands or scrollback.").font(.caption).foregroundStyle(.secondary)
                 Toggle("Confirm before closing running shells", isOn: $preferences.value.confirmClose)
+                Toggle("Remember full screen", isOn: $preferences.value.rememberFullScreen)
                 Toggle("Launch at login", isOn: Binding(get: { preferences.loginEnabled }, set: { preferences.setLogin($0) }))
                 if let error = preferences.loginError { Text(error).font(.caption).foregroundStyle(.secondary) }
                 if preferences.loginStatus == .requiresApproval {
@@ -97,11 +107,44 @@ struct PreferencesView: View {
                 }
             }
             Section("Window") {
+                Picker("Position", selection: $preferences.value.position) {
+                    ForEach(["Left", "Center", "Right"], id: \.self) { Text($0) }
+                }.pickerStyle(.segmented)
                 settingSlider("Width", value: $preferences.value.width, range: 0.4...1)
                 settingSlider("Height", value: $preferences.value.height, range: 0.25...0.95)
                 settingSlider("Opacity", value: $preferences.value.opacity, range: 0.75...1)
             }
         }.formStyle(.grouped)
+    }
+    private static let pointerDisplay = "\u{0}pointer"
+    private static let primaryDisplay = "\u{0}primary"
+    /// Connected display names, plus the saved one if it is disconnected.
+    private var displayNames: [String] {
+        var names = NSScreen.screens.map(\.localizedName)
+        let saved = preferences.value.displayName
+        if !saved.isEmpty && !names.contains(saved) { names.append(saved) }
+        return names
+    }
+    private var displaySelection: Binding<String> {
+        Binding(get: {
+            let value = preferences.value
+            return !value.displayName.isEmpty ? value.displayName : value.followMouse ? Self.pointerDisplay : Self.primaryDisplay
+        }, set: { choice in
+            switch choice {
+            case Self.pointerDisplay: preferences.value.displayName = ""; preferences.value.followMouse = true
+            case Self.primaryDisplay: preferences.value.displayName = ""; preferences.value.followMouse = false
+            default: preferences.value.displayName = choice
+            }
+        })
+    }
+    private func clearShortcut(_ keyPath: WritableKeyPath<Configuration, Shortcut>) -> some View {
+        Button {
+            _ = preferences.changeShortcut?(.disabled, keyPath)
+            preferences.value[keyPath: keyPath] = .disabled
+            preferences.shortcutError = nil
+        } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+            .buttonStyle(.plain).help("Clear shortcut")
+            .disabled(preferences.value[keyPath: keyPath].isDisabled)
     }
     private func settingSlider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
         HStack {
@@ -141,6 +184,8 @@ struct PreferencesView: View {
                 Text("Scrollback changes apply to new panes.").font(.caption).foregroundStyle(.secondary)
                 Toggle("Use Option as the Meta key", isOn: $preferences.value.optionAsMeta)
                 Toggle("Audible terminal bell", isOn: $preferences.value.audibleBell)
+                Toggle("Copy selected text automatically", isOn: $preferences.value.copyOnSelect)
+                Text("Middle-click pastes.").font(.caption).foregroundStyle(.secondary)
             }
         }.formStyle(.grouped)
             .onAppear(perform: validatePaths)
@@ -155,6 +200,7 @@ struct PreferencesView: View {
             Section("Terminal") {
                 shortcut("Show / hide", preferences.value.shortcut.label)
                 shortcut("Full screen", preferences.value.fullScreenShortcut.label)
+                shortcut("Full screen (terminal focused)", "⌘⏎")
                 shortcut("New tab / close pane", "⌘T / ⌘W")
                 shortcut("Select tab", "⌘1 … ⌘9")
                 shortcut("Previous / next tab", "⌘⇧[ / ⌘⇧]")
@@ -167,6 +213,9 @@ struct PreferencesView: View {
                 shortcut("Increase / decrease font size", "⌘+ / ⌘−")
                 shortcut("Reset font size / clear scrollback", "⌘0 / ⌘K")
                 shortcut("Preferences / quit", "⌘, / ⌘Q")
+                shortcut("Rename tab", "Double-click tab")
+                shortcut("Paste", "Middle-click")
+                shortcut("Context menu", "Right-click")
             }
         }.formStyle(.grouped)
     }

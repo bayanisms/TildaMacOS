@@ -33,6 +33,9 @@ final class GlobalHotKey {
         references[id] = newReference
         return true
     }
+    func unregister(id: UInt32) {
+        if let old = references.removeValue(forKey: id) { UnregisterEventHotKey(old) }
+    }
     deinit {
         references.values.forEach { UnregisterEventHotKey($0) }
         if let handler { RemoveEventHandler(handler) }
@@ -90,7 +93,7 @@ final class RecorderButton: NSButton {
         label += functions[event.keyCode] ?? [49:"Space",48:"Tab",36:"Return",123:"←",124:"→",125:"↓",126:"↑" ][event.keyCode] ?? event.charactersIgnoringModifiers?.uppercased() ?? "Key \(event.keyCode)"
         let shortcut = Shortcut(keyCode: UInt32(event.keyCode), modifiers: carbon, label: label)
         let other: WritableKeyPath<Configuration, Shortcut> = keyPath == \.shortcut ? \.fullScreenShortcut : \.shortcut
-        if shortcut == preferences.value[keyPath: other] {
+        if !shortcut.isDisabled && shortcut == preferences.value[keyPath: other] {
             preferences.shortcutError = "Tilda already uses that shortcut. Try another combination."
         } else if shortcut == preferences.value[keyPath: keyPath] || preferences.changeShortcut?(shortcut, keyPath) == true {
             preferences.value[keyPath: keyPath] = shortcut; preferences.shortcutError = nil
