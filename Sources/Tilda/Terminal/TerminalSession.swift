@@ -53,7 +53,7 @@ final class TerminalSession: NSObject, Identifiable, LocalProcessTerminalViewDel
         }
         title = URL(fileURLWithPath: shell).lastPathComponent
         var environment = Terminal.getEnvironmentVariables(termName: "xterm-256color")
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.3"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.4"
         environment += ["TERM_PROGRAM=Tilda", "TERM_PROGRAM_VERSION=\(version)", "SHELL=\(shell)", "PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"]
         environment.append("TERM_SESSION_ID=\(id.uuidString)")
         for key in ["SSH_AUTH_SOCK", "TMPDIR"] {
