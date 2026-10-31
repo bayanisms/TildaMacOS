@@ -2,6 +2,20 @@
 
 Native dropdown terminal for macOS 13 or newer. Supports tabs, split panes, scrollback search, SSH location detection, themes, and optional launch at login.
 
+## Screenshots
+
+![Split panes in the Midnight theme](docs/screenshots/midnight.png)
+
+![Split panes in the Daylight theme](docs/screenshots/daylight.png)
+
+| General | Appearance |
+| --- | --- |
+| ![General settings](docs/screenshots/settings-general.png) | ![Appearance settings](docs/screenshots/settings-appearance.png) |
+
+| Terminal | Shortcuts |
+| --- | --- |
+| ![Terminal settings](docs/screenshots/settings-terminal.png) | ![Shortcuts settings](docs/screenshots/settings-shortcuts.png) |
+
 ## Install
 
 Open the DMG in `dist/` and drag Tilda to Applications. The included build is for Apple Silicon and is locally signed, without Apple notarization.
